@@ -3,41 +3,61 @@
 #include <iostream>
 #include <cmath>
 
+#include <chrono>
+
 #include <SFML/Graphics.hpp>
 
-constexpr std::size_t DIM = 32; /* cell size */
-constexpr std::size_t WIDTH = 1920;
-constexpr std::size_t HEIGHT = 1080;
-constexpr std::size_t CELLS = WIDTH / DIM + 1; /* number of cells in a grid */
+class Timer
+{
+private:
+	// Type aliases to make accessing nested type easier
+	using Clock = std::chrono::steady_clock;
+	using Second = std::chrono::duration<double, std::ratio<1> >;
 
-__global__ void init(int n, sf::Vertex* top, sf::Vertex* left) {
-	int index = threadIdx.x;
-	int stride = blockDim.x;
-	for (int i = index; i < n; i += stride) {
-		top[i].position.x = n * i;
-		top[i].position.y = 0;
-		left[i].position.x = 0;
-		left[i].position.y = n * i;
+	std::chrono::time_point<Clock> m_beg{ Clock::now() };
+
+public:
+	void reset()
+	{
+		m_beg = Clock::now();
 	}
-}
 
-__global__ void nextGen(int n, bool* current, bool* successor) {
-	const int index = threadIdx.x;
-	const int stride = blockDim.x;
-	for (int i = index; i < n; i += stride) {
-		if (i > 0 && i < n - 1) {
-			const int neighbours =
-				static_cast<int>(current[(i - 1) * n + (i - 1)])
-				+ static_cast<int>(current[i * n + (i - 1)])
-				+ static_cast<int>(current[(i + 1) * n + (i - 1)])
-				+ static_cast<int>(current[(i - 1) * n + i])
-				+ static_cast<int>(current[(i + 1) * n + i])
-				+ static_cast<int>(current[(i - 1) * n + (i + 1)])
-				+ static_cast<int>(current[i * n + (i + 1)])
-				+ static_cast<int>(current[(i + 1) * n + (i + 1)]);
+	double elapsed() const
+	{
+		return std::chrono::duration_cast<Second>(Clock::now() - m_beg).count();
+	}
+};
 
-			const bool alive = current[i * n + i];
-			successor[i * n + i] = (neighbours == 3 || (neighbours == 2 && alive));
+#define SIZE 128
+
+__global__ void nextGen(bool* current, bool* successor) {
+	// calculate global thread index
+	const int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	const int stride = blockDim.x * gridDim.x;
+
+	// Grid Stride Loop: covers all cells even if threads < cells
+	for (int k = idx; k < SIZE * SIZE; k += stride) {
+
+		// Map 1D index 'k' to 2D coordinates
+		const int i = k % SIZE; // x column
+		const int j = k / SIZE; // y row
+
+		if (i > 0 && j > 0 && i < SIZE - 1 && j < SIZE - 1) {
+			int neighbors = 0;
+			neighbors += current[(j - 1) * SIZE + (i - 1)];
+			neighbors += current[(j - 1) * SIZE + i];
+			neighbors += current[(j - 1) * SIZE + (i + 1)];
+			neighbors += current[j * SIZE + (i - 1)];
+			neighbors += current[j * SIZE + (i + 1)];
+			neighbors += current[(j + 1) * SIZE + (i - 1)];
+			neighbors += current[(j + 1) * SIZE + i];
+			neighbors += current[(j + 1) * SIZE + (i + 1)];
+
+			bool isAlive = current[j * SIZE + i];
+			successor[k] = (neighbors == 3 || (neighbors == 2 && isAlive));
+		}
+		else {
+			successor[k] = false;
 		}
 	}
 }
@@ -48,45 +68,76 @@ enum class State {
 };
 
 int main(void) {
-	sf::RenderWindow window(sf::VideoMode(200, 200), "SFML works!");
-	sf::CircleShape shape(100.f);
+	sf::RenderWindow window(sf::VideoMode(1024, 1024), "SFML works!");
+	sf::CircleShape shape;
 	shape.setFillColor(sf::Color::Green);
+	const float scale = 1024.0f / SIZE;
+	shape.setRadius(scale / 2.0f);
+	State state = State::Editing;
 
-	sf::Vertex top[32], left[32];
+	constexpr int N = SIZE * SIZE;
+	bool *current, *successor;
 
-	cudaMallocManaged(reinterpret_cast<void**>(&top), sizeof(top));
-	cudaMallocManaged(reinterpret_cast<void**>(&left), sizeof(left));
+	cudaMallocManaged(reinterpret_cast<void**>(&current), sizeof(current) * N);
+	cudaMallocManaged(reinterpret_cast<void**>(&successor), sizeof(successor) * N);
 
-	init<<<1, 256>>>(32, top, left);
-
-	cudaDeviceSynchronize();
-
-	bool* current, * successor;
-
-	cudaMallocManaged(reinterpret_cast<void**>(&current), sizeof(current) * 32 * 32);
-	cudaMallocManaged(reinterpret_cast<void**>(&successor), sizeof(successor) * 32 * 32);
-
-	// initialize on host
-	current = {}, successor = {};
+	cudaMemset(current, 0, sizeof(current) * N);
+	cudaMemset(successor, 0, sizeof(successor) * N);
 
 	while (window.isOpen()) {
 		sf::Event event;
 		while (window.pollEvent(event)) {
 			if (event.type == sf::Event::Closed)
 				window.close();
+			else if (event.type == sf::Event::MouseButtonPressed) {
+				if (event.mouseButton.button == sf::Mouse::Button::Left) {
+					const auto pixel = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+					const unsigned x = pixel.x / (1024 / SIZE);
+					const unsigned y = pixel.y / (1024 / SIZE);
+					current[y * SIZE + x] = !current[y * SIZE + x];
+				}
+			}
+			else if (event.type == sf::Event::KeyPressed) {
+				switch (event.key.scancode) {
+				case sf::Keyboard::Scancode::R:
+					state = State::Simulating;
+					break;
+				case sf::Keyboard::Scancode::S:
+					state = State::Editing;
+					break;
+				default:
+					break;
+				}
+			}
 		}
 
-		nextGen<<<1, 256>>>(32, current, successor);
-		cudaDeviceSynchronize();
-		current = successor;
+		if (state == State::Simulating) {
+			Timer t;
+			int numBlocks = (N + 255) / 256;
+			nextGen << <numBlocks, 256 >> > (current, successor);
+			
+			cudaDeviceSynchronize();
+			
+			std::swap(current, successor);
+			std::cout << t.elapsed() << '\n';
+		}
 
 		window.clear();
-		window.draw(shape);
+
+		for (int i = 0; i < SIZE; ++i) {
+			for (int j = 0; j < SIZE; ++j) {
+				if (current[j * SIZE +i]) {
+					shape.setPosition(sf::Vector2f(i * scale, j * scale));
+					window.draw(shape);
+				}
+			}
+		}
+		
 		window.display();
 	}
 
-	cudaFree(top);
-	cudaFree(left);
+	cudaFree(current);
+	cudaFree(successor);
 
 	return 0;
 }
