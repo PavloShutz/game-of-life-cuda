@@ -87,6 +87,13 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 	cudaMemset(current, 0, sizeof(current) * N);
 	cudaMemset(successor, 0, sizeof(successor) * N);
 
+	const WCHAR* szRLE = L"";
+
+	COMDLG_FILTERSPEC rgSpec[] =
+	{
+			{ szRLE, L"*.rle" }
+	};
+
 	while (window.isOpen()) {
 		sf::Event event;
 		while (window.pollEvent(event)) {
@@ -114,12 +121,13 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 					if (SUCCEEDED(hr))
 					{
 						IFileOpenDialog* pFileOpen;
-
+						
 						hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
 							IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
 
 						if (SUCCEEDED(hr))
 						{
+							pFileOpen->SetFileTypes(1, rgSpec);
 							hr = pFileOpen->Show(NULL);
 
 							// TODO: Retrieve file, open it and import pattern
