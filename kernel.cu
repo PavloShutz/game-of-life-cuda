@@ -1,4 +1,7 @@
-﻿#include <cuda_runtime_api.h>
+﻿#include <Windows.h>
+#include <shobjidl.h>
+
+#include <cuda_runtime_api.h>
 #include <device_launch_parameters.h>
 #include <iostream>
 #include <cmath>
@@ -67,7 +70,7 @@ enum class State {
 	Simulating
 };
 
-int main(void) {
+int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow){
 	sf::RenderWindow window(sf::VideoMode(1024, 1024), "SFML works!");
 	sf::CircleShape shape;
 	shape.setFillColor(sf::Color::Green);
@@ -105,6 +108,28 @@ int main(void) {
 				case sf::Keyboard::Scancode::S:
 					state = State::Editing;
 					break;
+				case sf::Keyboard::Scancode::O:
+				{
+					HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+					if (SUCCEEDED(hr))
+					{
+						IFileOpenDialog* pFileOpen;
+
+						hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
+							IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
+
+						if (SUCCEEDED(hr))
+						{
+							hr = pFileOpen->Show(NULL);
+
+							// TODO: Retrieve file, open it and import pattern
+
+							pFileOpen->Release();
+						}
+						CoUninitialize();
+					}
+				}
+					break;
 				default:
 					break;
 				}
@@ -113,7 +138,7 @@ int main(void) {
 
 		if (state == State::Simulating) {
 			Timer t;
-			int numBlocks = (N + 255) / 256;
+			const int numBlocks = (N + 255) / 256;
 			nextGen << <numBlocks, 256 >> > (current, successor);
 			
 			cudaDeviceSynchronize();
