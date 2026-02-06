@@ -33,19 +33,21 @@ public:
 
 #define SIZE 128
 
-__global__ void nextGen(bool* current, bool* successor) {
+__global__ void nextGen(bool* current, bool* successor)
+{
 	// calculate global thread index
 	const int idx = threadIdx.x + blockIdx.x * blockDim.x;
 	const int stride = blockDim.x * gridDim.x;
 
 	// Grid Stride Loop: covers all cells even if threads < cells
-	for (int k = idx; k < SIZE * SIZE; k += stride) {
-
+	for (int k = idx; k < SIZE * SIZE; k += stride)
+	{
 		// Map 1D index 'k' to 2D coordinates
 		const int i = k % SIZE; // x column
 		const int j = k / SIZE; // y row
 
-		if (i > 0 && j > 0 && i < SIZE - 1 && j < SIZE - 1) {
+		if (i > 0 && j > 0 && i < SIZE - 1 && j < SIZE - 1)
+		{
 			int neighbors = 0;
 			neighbors += current[(j - 1) * SIZE + (i - 1)];
 			neighbors += current[(j - 1) * SIZE + i];
@@ -59,18 +61,21 @@ __global__ void nextGen(bool* current, bool* successor) {
 			bool isAlive = current[j * SIZE + i];
 			successor[k] = (neighbors == 3 || (neighbors == 2 && isAlive));
 		}
-		else {
+		else
+		{
 			successor[k] = false;
 		}
 	}
 }
 
-enum class State {
+enum class State
+{
 	Editing,
 	Simulating
 };
 
-int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow){
+int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow)
+{
 	sf::RenderWindow window(sf::VideoMode(1024, 1024), "SFML works!");
 	sf::CircleShape shape;
 	shape.setFillColor(sf::Color::Green);
@@ -96,20 +101,27 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 	PWSTR fPattern;
 
-	while (window.isOpen()) {
+	while (window.isOpen())
+	{
 		sf::Event event;
-		while (window.pollEvent(event)) {
+		while (window.pollEvent(event))
+		{
 			if (event.type == sf::Event::Closed)
+			{
 				window.close();
-			else if (event.type == sf::Event::MouseButtonPressed) {
-				if (event.mouseButton.button == sf::Mouse::Button::Left) {
+			}
+			else if (event.type == sf::Event::MouseButtonPressed)
+			{
+				if (event.mouseButton.button == sf::Mouse::Button::Left)
+				{
 					const auto pixel = window.mapPixelToCoords(sf::Mouse::getPosition(window));
 					const unsigned x = pixel.x / (1024 / SIZE);
 					const unsigned y = pixel.y / (1024 / SIZE);
 					current[y * SIZE + x] = !current[y * SIZE + x];
 				}
 			}
-			else if (event.type == sf::Event::KeyPressed) {
+			else if (event.type == sf::Event::KeyPressed)
+			{
 				switch (event.key.scancode) {
 				case sf::Keyboard::Scancode::R:
 					state = State::Simulating;
@@ -129,19 +141,25 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 						if (SUCCEEDED(hr))
 						{
-							pFileOpen->SetFileTypes(1, rgSpec);
-							hr = pFileOpen->Show(NULL);
-
+							hr = pFileOpen->SetFileTypes(1, rgSpec);
 							if (SUCCEEDED(hr))
 							{
-								IShellItem* pItem;
-								hr = pFileOpen->GetResult(&pItem);
+								hr = pFileOpen->Show(NULL);
+								if (SUCCEEDED(hr))
+								{
+									IShellItem* pItem;
+									hr = pFileOpen->GetResult(&pItem);
+									if (SUCCEEDED(hr))
+									{
+										hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &fPattern);
+										if (SUCCEEDED(hr))
+										{
 
-								hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &fPattern);
-
-								pItem->Release();
+										}
+										pItem->Release();
+									}
+								}
 							}
-
 							pFileOpen->Release();
 						}
 						CoUninitialize();
@@ -154,7 +172,8 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			}
 		}
 
-		if (state == State::Simulating) {
+		if (state == State::Simulating)
+		{
 			Timer t;
 			const int numBlocks = (N + 255) / 256;
 			nextGen << <numBlocks, 256 >> > (current, successor);
@@ -167,9 +186,12 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 		window.clear();
 
-		for (int i = 0; i < SIZE; ++i) {
-			for (int j = 0; j < SIZE; ++j) {
-				if (current[j * SIZE +i]) {
+		for (int i = 0; i < SIZE; ++i)
+		{
+			for (int j = 0; j < SIZE; ++j)
+			{
+				if (current[j * SIZE +i])
+				{
 					shape.setPosition(sf::Vector2f(i * scale, j * scale));
 					window.draw(shape);
 				}
