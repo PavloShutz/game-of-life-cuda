@@ -94,6 +94,8 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			{ szRLE, L"*.rle" }
 	};
 
+	PWSTR fPattern;
+
 	while (window.isOpen()) {
 		sf::Event event;
 		while (window.pollEvent(event)) {
@@ -130,7 +132,15 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 							pFileOpen->SetFileTypes(1, rgSpec);
 							hr = pFileOpen->Show(NULL);
 
-							// TODO: Retrieve file, open it and import pattern
+							if (SUCCEEDED(hr))
+							{
+								IShellItem* pItem;
+								hr = pFileOpen->GetResult(&pItem);
+
+								hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &fPattern);
+
+								pItem->Release();
+							}
 
 							pFileOpen->Release();
 						}
