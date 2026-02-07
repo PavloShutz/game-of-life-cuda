@@ -5,6 +5,9 @@
 #include <device_launch_parameters.h>
 #include <iostream>
 #include <cmath>
+#include <fstream>
+#include <regex>
+#include <string>
 
 #include <chrono>
 
@@ -74,6 +77,59 @@ enum class State
 	Simulating
 };
 
+auto importPattern(PWSTR pattern) -> bool (*)[] {
+	std::ifstream ifs(pattern);
+	std::string line, contents;
+	std::regex ptrn(R"(x\s*=\s*(\d+),\s*y\s*=\s*(\d+))");
+	std::smatch matches;
+
+	while (std::getline(ifs, line))
+	{
+		if (std::regex_search(line, matches, ptrn))
+		{
+			int x = std::stoi(matches[1]);
+			int y = std::stoi(matches[2]);
+
+			std::cout << "x=" << x << ", y=" << y << std::endl;
+		}
+		else if (!line.empty() && line[0] != '#')  // ignore comments
+		{
+			contents += line;
+		}
+	}
+
+	std::size_t prevPos = 0, nextPos = 0;
+	std::string repeatings;
+	while (contents[nextPos] != '!')
+	{
+		if (contents[nextPos] == 'o' || contents[nextPos] == 'b')
+		{
+			// Get the amount of cell's repetition
+			repeatings = contents.substr(prevPos, nextPos - prevPos);
+
+			int cnt = 1;
+			if (!repeatings.empty())
+				cnt = std::stoi(repeatings);
+
+			std::cout << std::string(cnt, (contents[nextPos] == 'b' ? '.' : '0'));
+
+			prevPos = nextPos + 1;
+		}
+		else if (contents[nextPos] == '$')
+		{
+			repeatings = contents.substr(prevPos, nextPos - prevPos);
+			int cnt = 1;
+			if (!repeatings.empty())
+				cnt = std::stoi(repeatings);
+			std::cout << std::string(cnt, '\n');
+			++prevPos;
+		}
+		++nextPos;
+	}
+
+	return nullptr;
+}
+
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow)
 {
 	sf::RenderWindow window(sf::VideoMode(1024, 1024), "SFML works!");
@@ -84,7 +140,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 	State state = State::Editing;
 
 	constexpr int N = SIZE * SIZE;
-	bool *current, *successor;
+	bool* current, * successor;
 
 	cudaMallocManaged(reinterpret_cast<void**>(&current), sizeof(current) * N);
 	cudaMallocManaged(reinterpret_cast<void**>(&successor), sizeof(successor) * N);
@@ -135,7 +191,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 					if (SUCCEEDED(hr))
 					{
 						IFileOpenDialog* pFileOpen;
-						
+
 						hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
 							IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
 
@@ -154,7 +210,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 										hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &fPattern);
 										if (SUCCEEDED(hr))
 										{
-
+											importPattern(fPattern);
 										}
 										pItem->Release();
 									}
@@ -165,7 +221,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 						CoUninitialize();
 					}
 				}
-					break;
+				break;
 				default:
 					break;
 				}
@@ -177,9 +233,9 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			Timer t;
 			const int numBlocks = (N + 255) / 256;
 			nextGen << <numBlocks, 256 >> > (current, successor);
-			
+
 			cudaDeviceSynchronize();
-			
+
 			std::swap(current, successor);
 			std::cout << t.elapsed() << '\n';
 		}
@@ -190,14 +246,14 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 		{
 			for (int j = 0; j < SIZE; ++j)
 			{
-				if (current[j * SIZE +i])
+				if (current[j * SIZE + i])
 				{
 					shape.setPosition(sf::Vector2f(i * scale, j * scale));
 					window.draw(shape);
 				}
 			}
 		}
-		
+
 		window.display();
 	}
 
