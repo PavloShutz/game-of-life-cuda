@@ -1,4 +1,4 @@
-﻿#include <Windows.h>
+#include <Windows.h>
 #include <shobjidl.h>
 
 #include <cuda_runtime_api.h>
@@ -77,20 +77,70 @@ enum class State
 	Simulating
 };
 
-auto importPattern(PWSTR pattern) -> bool (*)[] {
+struct Dimension {
+	int x;
+	int y;
+};
+
+struct Pattern {
+	Dimension dimension;
+	bool* cells;
+
+	Pattern() : dimension{ 0, 0 }, cells(nullptr) {}
+
+	Pattern(Dimension dim, bool* data) : dimension(dim), cells(data) {}
+
+	~Pattern() {
+		delete[] cells;
+	}
+
+	// Prevent copying (raw pointer ownership)
+	Pattern(const Pattern&) = delete;
+	Pattern& operator=(const Pattern&) = delete;
+
+	// Allow moving
+	Pattern(Pattern&& other) noexcept
+		: dimension(other.dimension), cells(other.cells) {
+		other.cells = nullptr;
+	}
+
+	inline bool isValid() const {
+		return cells != nullptr && dimension.x > 0 && dimension.y > 0;
+	}
+};
+
+int getCount(std::string repeatings)
+{
+	if (!repeatings.empty())
+		return std::stoi(repeatings);
+	return 1;
+}
+
+bool getPatternDimension(std::regex ptrn, std::string line, std::smatch matches, Dimension& dim) {
+	if (std::regex_search(line, matches, ptrn))
+	{
+		dim.x = std::stoi(matches[1]);
+		dim.y = std::stoi(matches[2]);
+		return true;
+	}
+	return false;
+}
+
+Pattern importPattern(PWSTR pattern)
+{
 	std::ifstream ifs(pattern);
 	std::string line, contents;
 	std::regex ptrn(R"(x\s*=\s*(\d+),\s*y\s*=\s*(\d+))");
 	std::smatch matches;
 
+	bool* grid = nullptr;
+	Dimension dimension{};
+
 	while (std::getline(ifs, line))
 	{
-		if (std::regex_search(line, matches, ptrn))
+		if (getPatternDimension(ptrn, line, matches, dimension))
 		{
-			int x = std::stoi(matches[1]);
-			int y = std::stoi(matches[2]);
-
-			std::cout << "x=" << x << ", y=" << y << std::endl;
+			grid = new bool[dimension.x * dimension.y] {};
 		}
 		else if (!line.empty() && line[0] != '#')  // ignore comments
 		{
@@ -98,36 +148,48 @@ auto importPattern(PWSTR pattern) -> bool (*)[] {
 		}
 	}
 
+	std::size_t currentX = 0, currentY = 0; // coordinate in a new pattern grid
 	std::size_t prevPos = 0, nextPos = 0;
-	std::string repeatings;
-	while (contents[nextPos] != '!')
+	std::string repeatingsBuf;
+	for (char ch : contents)
 	{
-		if (contents[nextPos] == 'o' || contents[nextPos] == 'b')
+		if (ch == '!') // end of pattern
+			break;
+
+		if (std::isdigit(ch))
 		{
-			// Get the amount of cell's repetition
-			repeatings = contents.substr(prevPos, nextPos - prevPos);
-
-			int cnt = 1;
-			if (!repeatings.empty())
-				cnt = std::stoi(repeatings);
-
-			std::cout << std::string(cnt, (contents[nextPos] == 'b' ? '.' : '0'));
-
-			prevPos = nextPos + 1;
+			repeatingsBuf += ch;
 		}
-		else if (contents[nextPos] == '$')
+		else
 		{
-			repeatings = contents.substr(prevPos, nextPos - prevPos);
-			int cnt = 1;
-			if (!repeatings.empty())
-				cnt = std::stoi(repeatings);
-			std::cout << std::string(cnt, '\n');
-			++prevPos;
+			const int count = getCount(repeatingsBuf);
+			repeatingsBuf.clear();
+
+			if (ch == 'b')
+			{
+				currentX += count;
+			}
+			else if (ch == 'o')
+			{
+				for (int i = 0; i < count; ++i)
+				{
+					if (currentX < dimension.x && currentY < dimension.y)
+					{
+						grid[currentY * dimension.x + currentX] = true;
+					}
+					currentX++;
+				}
+			}
+			else if (ch == '$') // new line
+			{
+				currentY += count;
+				currentX = 0;
+			}
 		}
-		++nextPos;
 	}
 
-	return nullptr;
+	Pattern result(dimension, grid);
+	return result;
 }
 
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow)
@@ -149,12 +211,11 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 	cudaMemset(successor, 0, sizeof(successor) * N);
 
 	const WCHAR* szRLE = L"";
-
 	COMDLG_FILTERSPEC rgSpec[] =
 	{
 			{ szRLE, L"*.rle" }
 	};
-
+	const auto rgSpecSize = sizeof(rgSpec) / sizeof(COMDLG_FILTERSPEC);
 	PWSTR fPattern;
 
 	while (window.isOpen())
@@ -197,7 +258,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 						if (SUCCEEDED(hr))
 						{
-							hr = pFileOpen->SetFileTypes(1, rgSpec);
+							hr = pFileOpen->SetFileTypes(rgSpecSize, rgSpec);
 							if (SUCCEEDED(hr))
 							{
 								hr = pFileOpen->Show(NULL);
@@ -210,7 +271,15 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 										hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &fPattern);
 										if (SUCCEEDED(hr))
 										{
-											importPattern(fPattern);
+											auto pattern = importPattern(fPattern);
+											if (pattern.isValid())
+											{
+												const int maxX = (pattern.dimension.x < SIZE) ? pattern.dimension.x : SIZE;
+												const int maxY = (pattern.dimension.y < SIZE) ? pattern.dimension.y : SIZE;
+												for (int i = 0; i < maxX; ++i)
+													for (int j = 0; j < maxY; ++j)
+														current[j * SIZE + i] = pattern.cells[j * pattern.dimension.x + i];
+											}
 										}
 										pItem->Release();
 									}
