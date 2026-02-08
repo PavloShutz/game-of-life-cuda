@@ -34,7 +34,7 @@ public:
 	}
 };
 
-#define SIZE 128
+constexpr int GRID_SIZE = 128;
 
 __global__ void nextGen(bool* current, bool* successor)
 {
@@ -43,25 +43,25 @@ __global__ void nextGen(bool* current, bool* successor)
 	const int stride = blockDim.x * gridDim.x;
 
 	// Grid Stride Loop: covers all cells even if threads < cells
-	for (int k = idx; k < SIZE * SIZE; k += stride)
+	for (int k = idx; k < GRID_SIZE * GRID_SIZE; k += stride)
 	{
 		// Map 1D index 'k' to 2D coordinates
-		const int i = k % SIZE; // x column
-		const int j = k / SIZE; // y row
+		const int i = k % GRID_SIZE; // x column
+		const int j = k / GRID_SIZE; // y row
 
-		if (i > 0 && j > 0 && i < SIZE - 1 && j < SIZE - 1)
+		if (i > 0 && j > 0 && i < GRID_SIZE - 1 && j < GRID_SIZE - 1)
 		{
 			int neighbors = 0;
-			neighbors += current[(j - 1) * SIZE + (i - 1)];
-			neighbors += current[(j - 1) * SIZE + i];
-			neighbors += current[(j - 1) * SIZE + (i + 1)];
-			neighbors += current[j * SIZE + (i - 1)];
-			neighbors += current[j * SIZE + (i + 1)];
-			neighbors += current[(j + 1) * SIZE + (i - 1)];
-			neighbors += current[(j + 1) * SIZE + i];
-			neighbors += current[(j + 1) * SIZE + (i + 1)];
+			neighbors += current[(j - 1) * GRID_SIZE + (i - 1)];
+			neighbors += current[(j - 1) * GRID_SIZE + i];
+			neighbors += current[(j - 1) * GRID_SIZE + (i + 1)];
+			neighbors += current[j * GRID_SIZE + (i - 1)];
+			neighbors += current[j * GRID_SIZE + (i + 1)];
+			neighbors += current[(j + 1) * GRID_SIZE + (i - 1)];
+			neighbors += current[(j + 1) * GRID_SIZE + i];
+			neighbors += current[(j + 1) * GRID_SIZE + (i + 1)];
 
-			bool isAlive = current[j * SIZE + i];
+			bool isAlive = current[j * GRID_SIZE + i];
 			successor[k] = (neighbors == 3 || (neighbors == 2 && isAlive));
 		}
 		else
@@ -77,7 +77,8 @@ enum class State
 	Simulating
 };
 
-struct Dimension {
+struct Dimension
+{
 	int x;
 	int y;
 };
@@ -90,7 +91,8 @@ struct Pattern {
 
 	Pattern(Dimension dim, bool* data) : dimension(dim), cells(data) {}
 
-	~Pattern() {
+	~Pattern()
+	{
 		delete[] cells;
 	}
 
@@ -100,11 +102,13 @@ struct Pattern {
 
 	// Allow moving
 	Pattern(Pattern&& other) noexcept
-		: dimension(other.dimension), cells(other.cells) {
+		: dimension(other.dimension), cells(other.cells)
+	{
 		other.cells = nullptr;
 	}
 
-	inline bool isValid() const {
+	inline bool isValid() const
+	{
 		return cells != nullptr && dimension.x > 0 && dimension.y > 0;
 	}
 };
@@ -116,40 +120,43 @@ int getCount(std::string repeatings)
 	return 1;
 }
 
-bool getPatternDimension(std::regex ptrn, std::string line, std::smatch matches, Dimension& dim) {
-	if (std::regex_search(line, matches, ptrn))
+Dimension getPatternDimension(PWSTR pattern) {
+	std::ifstream ifs(pattern);
+	std::string line;
+	std::regex ptrn(R"(x\s*=\s*(\d+),\s*y\s*=\s*(\d+))");
+	std::smatch matches;
+	while (std::getline(ifs, line))
 	{
-		dim.x = std::stoi(matches[1]);
-		dim.y = std::stoi(matches[2]);
-		return true;
+		if (std::regex_search(line, matches, ptrn))
+		{
+			Dimension dimension = Dimension{ std::stoi(matches[1]), std::stoi(matches[2]) };
+			return dimension;
+		}
 	}
-	return false;
+	return Dimension{};
 }
 
-Pattern importPattern(PWSTR pattern)
+std::string getPatternContent(PWSTR pattern)
 {
 	std::ifstream ifs(pattern);
 	std::string line, contents;
-	std::regex ptrn(R"(x\s*=\s*(\d+),\s*y\s*=\s*(\d+))");
-	std::smatch matches;
-
-	bool* grid = nullptr;
-	Dimension dimension{};
-
 	while (std::getline(ifs, line))
 	{
-		if (getPatternDimension(ptrn, line, matches, dimension))
-		{
-			grid = new bool[dimension.x * dimension.y] {};
-		}
-		else if (!line.empty() && line[0] != '#')  // ignore comments
+		if (!line.empty() && line[0] != '#')  // ignore comments
 		{
 			contents += line;
 		}
 	}
+	return contents;
+}
+
+Pattern importPattern(PWSTR pattern)
+{
+	Dimension dimension = getPatternDimension(pattern);
+	bool* grid = new bool[dimension.x * dimension.y] {};
+	std::string contents = getPatternContent(pattern);
 
 	std::size_t currentX = 0, currentY = 0; // coordinate in a new pattern grid
-	std::size_t prevPos = 0, nextPos = 0;
 	std::string repeatingsBuf;
 	for (char ch : contents)
 	{
@@ -194,21 +201,21 @@ Pattern importPattern(PWSTR pattern)
 
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow)
 {
-	sf::RenderWindow window(sf::VideoMode(1024, 1024), "SFML works!");
+	sf::RenderWindow window(sf::VideoMode(1024, 1024), "GoL CUDA");
 	sf::CircleShape shape;
 	shape.setFillColor(sf::Color::Green);
-	const float scale = 1024.0f / SIZE;
+	const float scale = 1024.0f / GRID_SIZE;
 	shape.setRadius(scale / 2.0f);
 	State state = State::Editing;
 
-	constexpr int N = SIZE * SIZE;
+	constexpr int N = GRID_SIZE * GRID_SIZE;
 	bool* current, * successor;
 
-	cudaMallocManaged(reinterpret_cast<void**>(&current), sizeof(current) * N);
-	cudaMallocManaged(reinterpret_cast<void**>(&successor), sizeof(successor) * N);
+	cudaMallocManaged(reinterpret_cast<void**>(&current), sizeof(bool) * N);
+	cudaMallocManaged(reinterpret_cast<void**>(&successor), sizeof(bool) * N);
 
-	cudaMemset(current, 0, sizeof(current) * N);
-	cudaMemset(successor, 0, sizeof(successor) * N);
+	cudaMemset(current, 0, sizeof(bool) * N);
+	cudaMemset(successor, 0, sizeof(bool) * N);
 
 	const WCHAR* szRLE = L"";
 	COMDLG_FILTERSPEC rgSpec[] =
@@ -232,9 +239,9 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 				if (event.mouseButton.button == sf::Mouse::Button::Left)
 				{
 					const auto pixel = window.mapPixelToCoords(sf::Mouse::getPosition(window));
-					const unsigned x = pixel.x / (1024 / SIZE);
-					const unsigned y = pixel.y / (1024 / SIZE);
-					current[y * SIZE + x] = !current[y * SIZE + x];
+					const unsigned x = pixel.x / (1024 / GRID_SIZE);
+					const unsigned y = pixel.y / (1024 / GRID_SIZE);
+					current[y * GRID_SIZE + x] = !current[y * GRID_SIZE + x];
 				}
 			}
 			else if (event.type == sf::Event::KeyPressed)
@@ -274,11 +281,11 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 											auto pattern = importPattern(fPattern);
 											if (pattern.isValid())
 											{
-												const int maxX = (pattern.dimension.x < SIZE) ? pattern.dimension.x : SIZE;
-												const int maxY = (pattern.dimension.y < SIZE) ? pattern.dimension.y : SIZE;
+												const int maxX = (pattern.dimension.x < GRID_SIZE) ? pattern.dimension.x : GRID_SIZE;
+												const int maxY = (pattern.dimension.y < GRID_SIZE) ? pattern.dimension.y : GRID_SIZE;
 												for (int i = 0; i < maxX; ++i)
 													for (int j = 0; j < maxY; ++j)
-														current[j * SIZE + i] = pattern.cells[j * pattern.dimension.x + i];
+														current[j * GRID_SIZE + i] = pattern.cells[j * pattern.dimension.x + i];
 											}
 										}
 										pItem->Release();
@@ -301,7 +308,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 		{
 			Timer t;
 			const int numBlocks = (N + 255) / 256;
-			nextGen << <numBlocks, 256 >> > (current, successor);
+			nextGen<<<numBlocks, 256>>>(current, successor);
 
 			cudaDeviceSynchronize();
 
@@ -311,11 +318,11 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 		window.clear();
 
-		for (int i = 0; i < SIZE; ++i)
+		for (int i = 0; i < GRID_SIZE; ++i)
 		{
-			for (int j = 0; j < SIZE; ++j)
+			for (int j = 0; j < GRID_SIZE; ++j)
 			{
-				if (current[j * SIZE + i])
+				if (current[j * GRID_SIZE + i])
 				{
 					shape.setPosition(sf::Vector2f(i * scale, j * scale));
 					window.draw(shape);
