@@ -113,7 +113,7 @@ struct Pattern {
 	}
 };
 
-int getCount(std::string repeatings)
+int getCount(const std::string& repeatings)
 {
 	if (!repeatings.empty())
 		return std::stoi(repeatings);
@@ -150,14 +150,10 @@ std::string getPatternContent(PWSTR pattern)
 	return contents;
 }
 
-Pattern importPattern(PWSTR pattern)
+void fillGridFromPattern(bool* grid, const Dimension& dimension, const std::string& contents)
 {
-	Dimension dimension = getPatternDimension(pattern);
-	bool* grid = new bool[dimension.x * dimension.y] {};
-	std::string contents = getPatternContent(pattern);
-
-	std::size_t currentX = 0, currentY = 0; // coordinate in a new pattern grid
-	std::string repeatingsBuf;
+	std::size_t currentX = 0, currentY = 0; // coordinates in a new pattern grid
+	std::string buffer;
 	for (char ch : contents)
 	{
 		if (ch == '!') // end of pattern
@@ -165,12 +161,12 @@ Pattern importPattern(PWSTR pattern)
 
 		if (std::isdigit(ch))
 		{
-			repeatingsBuf += ch;
+			buffer += ch;
 		}
 		else
 		{
-			const int count = getCount(repeatingsBuf);
-			repeatingsBuf.clear();
+			const int count = getCount(buffer);
+			buffer.clear();
 
 			if (ch == 'b')
 			{
@@ -194,6 +190,15 @@ Pattern importPattern(PWSTR pattern)
 			}
 		}
 	}
+}
+
+Pattern importPattern(PWSTR pattern)
+{
+	Dimension dimension = getPatternDimension(pattern);
+	bool* grid = new bool[dimension.x * dimension.y] {};
+	std::string contents = getPatternContent(pattern);
+
+	fillGridFromPattern(grid, dimension, contents);
 
 	Pattern result(dimension, grid);
 	return result;
