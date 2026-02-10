@@ -17,6 +17,7 @@
 #include <SFML/Graphics.hpp>
 
 constexpr int GRID_SIZE = 128;
+constexpr float CELL_SCALE = 32.f;
 
 __global__ void nextGen(bool* current, bool* successor)
 {
@@ -53,6 +54,52 @@ __global__ void nextGen(bool* current, bool* successor)
 	}
 }
 
+void moveView(sf::View& view, sf::Keyboard::Scancode scan)
+{
+	sf::Vector2f offset;
+	switch (scan)
+	{
+	case sf::Keyboard::Scancode::A:
+		offset.x = -32.f;
+		break;
+	case sf::Keyboard::Scancode::D:
+		offset.x = 32.f;
+		break;
+	case sf::Keyboard::Scancode::W:
+		offset.y = -32.f;
+		break;
+	case sf::Keyboard::Scancode::S:
+		offset.y = 32.f;
+		break;
+	default:
+		break;
+	}
+	view.move(offset);
+
+	const sf::Vector2f viewSize = view.getSize();
+	sf::Vector2f center = view.getCenter();
+	const float worldSize = GRID_SIZE * CELL_SCALE;
+
+	const float minX = viewSize.x / 2.f;
+	const float maxX = worldSize - viewSize.x / 2.f;
+	const float minY = viewSize.y / 2.f;
+	const float maxY = worldSize - viewSize.y / 2.f;
+
+	// Clamp X
+	if (center.x < minX)
+		center.x = minX;
+	else if (center.x > maxX)
+		center.x = maxX;
+
+	// Clamp Y
+	if (center.y < minY)
+		center.y = minY;
+	else if (center.y > maxY)
+		center.y = maxY;
+
+	view.setCenter(center);
+}
+
 enum class State
 {
 	Editing,
@@ -62,10 +109,12 @@ enum class State
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow)
 {
 	sf::RenderWindow window(sf::VideoMode(1024, 1024), "GoL CUDA");
+	sf::View view(sf::FloatRect(0.f, 0.f, 1024.f, 1024.f));
+	window.setView(view);
+
 	sf::CircleShape shape;
 	shape.setFillColor(sf::Color::Green);
-	const float scale = 1024.0f / GRID_SIZE;
-	shape.setRadius(scale / 2.0f);
+	shape.setRadius(CELL_SCALE / 2.0f);
 	State state = State::Editing;
 
 	constexpr int N = GRID_SIZE * GRID_SIZE;
@@ -98,10 +147,13 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			{
 				if (event.mouseButton.button == sf::Mouse::Button::Left)
 				{
-					const auto pixel = window.mapPixelToCoords(sf::Mouse::getPosition(window));
-					const unsigned x = pixel.x / (1024 / GRID_SIZE);
-					const unsigned y = pixel.y / (1024 / GRID_SIZE);
-					current[y * GRID_SIZE + x] = !current[y * GRID_SIZE + x];
+					const auto worldPos = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+					const unsigned x = worldPos.x / CELL_SCALE;
+					const unsigned y = worldPos.y / CELL_SCALE;
+					if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE)
+					{
+						current[y * GRID_SIZE + x] = !current[y * GRID_SIZE + x];
+					}
 				}
 			}
 			else if (event.type == sf::Event::KeyPressed)
@@ -110,7 +162,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 				case sf::Keyboard::Scancode::R:
 					state = State::Simulating;
 					break;
-				case sf::Keyboard::Scancode::S:
+				case sf::Keyboard::Scancode::E:
 					state = State::Editing;
 					break;
 				case sf::Keyboard::Scancode::O:
@@ -158,6 +210,13 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 					}
 				}
 				break;
+				case sf::Keyboard::Scancode::A:
+				case sf::Keyboard::Scancode::D:
+				case sf::Keyboard::Scancode::W:
+				case sf::Keyboard::Scancode::S:
+					moveView(view, event.key.scancode);
+					window.setView(view);
+					break;
 				default:
 					break;
 				}
@@ -168,7 +227,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 		{
 			Timer t;
 			const int numBlocks = (N + 255) / 256;
-			nextGen<<<numBlocks, 256>>>(current, successor);
+			nextGen << <numBlocks, 256 >> > (current, successor);
 
 			cudaDeviceSynchronize();
 
@@ -184,7 +243,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			{
 				if (current[j * GRID_SIZE + i])
 				{
-					shape.setPosition(sf::Vector2f(i * scale, j * scale));
+					shape.setPosition(sf::Vector2f(i * CELL_SCALE, j * CELL_SCALE));
 					window.draw(shape);
 				}
 			}
