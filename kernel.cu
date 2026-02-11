@@ -1,4 +1,4 @@
-#include "life_rle.h"
+﻿#include "life_rle.h"
 #include "timer.h"
 
 #include <Windows.h>
@@ -134,6 +134,9 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 	const auto rgSpecSize = sizeof(rgSpec) / sizeof(COMDLG_FILTERSPEC);
 	PWSTR fPattern;
 
+	std::string logfile("log.txt");
+	std::fstream log(logfile, std::ios::app);
+
 	while (window.isOpen())
 	{
 		sf::Event event;
@@ -150,7 +153,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 					const auto worldPos = window.mapPixelToCoords(sf::Mouse::getPosition(window));
 					const unsigned x = worldPos.x / CELL_SCALE;
 					const unsigned y = worldPos.y / CELL_SCALE;
-					if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE)
+					if (x < GRID_SIZE && y < GRID_SIZE)
 					{
 						current[y * GRID_SIZE + x] = !current[y * GRID_SIZE + x];
 					}
@@ -232,7 +235,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			cudaDeviceSynchronize();
 
 			std::swap(current, successor);
-			std::cout << t.elapsed() << '\n';
+			log << t.elapsed() << '\n';
 		}
 
 		window.clear();
