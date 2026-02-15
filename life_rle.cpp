@@ -1,6 +1,4 @@
-#pragma once
-
-#include "life_rle.h"
+﻿#include "life_rle.h"
 
 #include <regex>
 #include <string>
